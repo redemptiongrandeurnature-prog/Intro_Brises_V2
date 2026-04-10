@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quiz Immersif — Grandeur Nature</title>
+
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  NOTES D'INTÉGRATION
+  ═══════════════════════════════════════════════════════════════════
+
+  GITHUB PAGES + IFRAME :
+    Dans Elementor, ajoute un widget "HTML" avec :
+    <iframe src="https://TON_USER.github.io/TON_REPO/quiz-immersif-v2.html"
+      style="width:100%;height:100vh;border:none;"
+      allow="autoplay">
+    </iframe>
+    L'attribut allow="autoplay" est OBLIGATOIRE pour les vidéos.
+
+  HÉBERGEMENT VIDÉOS (GRATUIT) — Cloudinary :
+    1. Crée un compte gratuit sur cloudinary.com
+    2. Upload tes clips dans la section "Media Library"
+    3. URL format : https://res.cloudinary.com/TON_CLOUD/video/upload/TON_ID.mp4
+    Quota gratuit : 25 Go stockage + 25 Go bande passante/mois
+    → Largement suffisant pour des clips de 5s (~3-5 Mo chacun)
+
+  ARCHITECTURE VIDÉO (3 SLOTS) :
+    Cherche "VIDÉO CONFIG" ci-dessous pour brancher tes URLs.
+    Chaque étape a : { loop: '...', transition: '...' }
+    - loop       → vidéo qui tourne en boucle pendant la question
+    - transition → vidéo qui joue UNE FOIS quand la réponse est donnée,
+                   et nous amène à la prochaine scène
+    Séquence : LOOP_A → (réponse) → TRANSITION_A joue par-dessus
+               → LOOP_B démarre dessous → TRANSITION_A disparaît
+
+  COLLECTE DE DONNÉES (GRATUIT) — Google Apps Script :
+    Cherche "GOOGLE APPS SCRIPT" pour les instructions complètes.
+  ═══════════════════════════════════════════════════════════════════
+-->
+
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Cinzel:wght@400;500&family=Raleway:wght@200;300;400&display=swap" rel="stylesheet">
+
+<style>
+/* ────────────────────────────────────────────────
+   VARIABLES & RESET
+──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --noir:    #050508;
+  --argent:  #c0c8d4;
+  --or:      #b89a5a;
+  --or-pale: #d4b97a;
+  --blanc:   #f0ece4;
+  --brume:   rgba(180,195,215,0.04);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--noir);
+  color: var(--blanc);
+  font-family: 'Raleway', sans-serif;
+  font-weight: 300;
+}
+
+/* ────────────────────────────────────────────────
+   COUCHE 1 — SCÈNE VIDÉO
+   3 slots superposés, transition par opacité CSS
+──────────────────────────────────────────────── */
+#scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--noir);
+}
+
+/*
+  ─── INTÉGRATION VIDÉO ─────────────────────────────────────────────
+  Quand tu auras tes vidéos sur Cloudinary, remplace chaque .bg-sim
+  par une balise <video> :
+
+  <video id="vid-loop-a" class="vid-slot" loop muted playsinline autoplay>
+    <source src="https://res.cloudinary.com/TON_CLOUD/video/upload/loop_intro.mp4">
+  </video>
+  <video id="vid-transition" class="vid-slot" muted playsinline>
+    <source src="" type="video/mp4">
+  </video>
+  <video id="vid-loop-b" class="vid-slot" loop muted playsinline>
+    <source src="" type="video/mp4">
+  </video>
+
+  Le CSS .vid-slot ci-dessous est déjà prêt pour ces éléments.
+  ────────────────────────────────────────────────────────────────────
+*/
+
+.vid-slot {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.vid-slot.active { opacity: 1; }
+
+/* ── Simulation CSS (remplacée par les vidéos en production) ── */
+.bg-sim {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  transition: opacity 1200ms cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.bg-sim.active { opacity: 1; }
+
+.bg-sim .orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  animation: orb-drift 22s ease-in-out infinite alternate;
+}
+@keyframes orb-drift {
+  0%   { transform: translate(0,0) scale(1); }
+  33%  { transform: translate(4vw,-3vh) scale(1.06); }
+  66%  { transform: translate(-3vw,4vh) scale(0.96); }
+  100% { transform: translate(2vw,-2vh) scale(1.04); }
+}
+
+/* Intro — bleu nuit */
+#bg-0 .orb:nth-child(1) { width:80vw;height:70vh;top:-10%;left:-15%;
+  background:radial-gradient(ellipse,#0b1830 0%,transparent 65%); }
+#bg-0 .orb:nth-child(2) { width:60vw;height:60vh;bottom:-15%;right:-5%;
+  background:radial-gradient(ellipse,#091222 0%,transparent 65%);
+  animation-delay:-8s; }
+
+/* Q1 — Forêt */
+#bg-1 .orb:nth-child(1) { width:90vw;height:65vh;top:5%;left:-20%;
+  background:radial-gradient(ellipse,#0c1e10 0%,transparent 60%); }
+#bg-1 .orb:nth-child(2) { width:65vw;height:70vh;bottom:-10%;right:-10%;
+  background:radial-gradient(ellipse,#0a1c0d 0%,transparent 65%);
+  animation-delay:-11s; }
+
+/* Q2 — Eau */
+#bg-2 .orb:nth-child(1) { width:100vw;height:60vh;top:0;left:-10%;
+  background:radial-gradient(ellipse,#0d1824 0%,transparent 60%); }
+#bg-2 .orb:nth-child(2) { width:55vw;height:90vh;bottom:-20%;right:0;
+  background:radial-gradient(ellipse,#0b1a2c 0%,transparent 65%);
+  animation-delay:-5s; }
+
+/* Q3 — Feu */
+#bg-3 .orb:nth-child(1) { width:80vw;height:70vh;top:-15%;left:10%;
+  background:radial-gradient(ellipse,#1c0e0a 0%,transparent 60%); }
+#bg-3 .orb:nth-child(2) { width:70vw;height:60vh;bottom:-5%;right:-5%;
+  background:radial-gradient(ellipse,#1a0c08 0%,transparent 65%);
+  animation-delay:-7s; }
+
+/* Q4 — Or */
+#bg-4 .orb:nth-child(1) { width:110vw;height:70vh;top:-10%;left:-15%;
+  background:radial-gradient(ellipse,#1c1608 0%,transparent 58%); }
+#bg-4 .orb:nth-child(2) { width:65vw;height:100vh;bottom:-30%;right:5%;
+  background:radial-gradient(ellipse,#1a1406 0%,transparent 62%);
+  animation-delay:-13s; }
+
+/* Résultat */
+#bg-5 .orb:nth-child(1) { width:90vw;height:90vh;top:-20%;left:-10%;
+  background:radial-gradient(ellipse,#161208 0%,transparent 55%); }
+#bg-5 .orb:nth-child(2) { width:75vw;height:80vh;bottom:-15%;right:-10%;
+  background:radial-gradient(ellipse,#110e06 0%,transparent 60%);
+  animation-delay:-9s; }
+
+/* ────────────────────────────────────────────────
+   COUCHE 2 — BRUME PERMANENTE
+──────────────────────────────────────────────── */
+#fog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Vignette */
+#fog-layer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 90% at 50% 50%,
+    transparent 25%, rgba(0,0,0,0.45) 65%, rgba(0,0,0,0.82) 100%);
+}
+
+/* Nappe basse */
+#fog-layer::after {
+  content: '';
+  position: absolute;
+  bottom: -8%; left: -5%; right: -5%; height: 40%;
+  background: radial-gradient(ellipse 120% 100% at 50% 100%,
+    rgba(6,9,16,0.92) 0%, rgba(6,9,16,0.55) 50%, transparent 100%);
+  animation: fog-breathe 14s ease-in-out infinite alternate;
+}
+@keyframes fog-breathe {
+  0%   { transform: translateY(0) scaleX(1); opacity: 0.8; }
+  100% { transform: translateY(-2%) scaleX(1.04); opacity: 1; }
+}
+
+/* Horizon lumineux */
+.horizon-glow {
+  position: fixed;
+  left: 0; right: 0;
+  top: 48%; height: 20vh;
+  background: radial-gradient(ellipse 70% 100% at 50% 50%,
+    rgba(180,195,215,0.018) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 2;
+  animation: horizon-pulse 20s ease-in-out infinite alternate;
+}
+@keyframes horizon-pulse {
+  0%   { opacity: 0.4; transform: scaleX(1); }
+  100% { opacity: 1;   transform: scaleX(1.15); }
+}
+
+/* Particules de brume ambiante */
+.fog-wisp {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(50px);
+  pointer-events: none;
+  z-index: 2;
+  animation: wisp-travel linear infinite;
+  opacity: 0;
+}
+@keyframes wisp-travel {
+  0%   { transform: translateX(-120px) translateY(5px); opacity: 0; }
+  8%   { opacity: 0.05; }
+  92%  { opacity: 0.03; }
+  100% { transform: translateX(calc(100vw + 120px)) translateY(-15px); opacity: 0; }
+}
+
+/* ────────────────────────────────────────────────
+   EFFETS DE SÉLECTION — MIST BURST
+──────────────────────────────────────────────── */
+
+/* Anneaux de brume qui s'expandent */
+.mist-ring {
+  position: fixed;
+  border-radius: 50%;
+  border: 1px solid rgba(200,215,235,0.5);
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+  z-index: 200;
+  animation: ring-expand 900ms cubic-bezier(0.2, 0.6, 0.4, 1) forwards;
+}
+@keyframes ring-expand {
+  0%   { transform: translate(-50%,-50%) scale(0);
+         border-color: rgba(220,230,250,0.7);
+         width: 20px; height: 8px; }
+  40%  { border-color: rgba(184,154,90,0.35); }
+  100% { transform: translate(-50%,-50%) scale(1);
+         border-color: rgba(184,154,90,0);
+         width: 280px; height: 70px; }
+}
+
+/* Particules de sélection */
+.sel-particle {
+  position: fixed;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 201;
+  animation: sel-particle-fly ease-out forwards;
+}
+@keyframes sel-particle-fly {
+  0%   { transform: translate(-50%,-50%) translate(0,0) scale(1); opacity: 0.9; }
+  100% { transform: translate(-50%,-50%) translate(var(--dx),var(--dy)) scale(0); opacity: 0; }
+}
+
+/* ────────────────────────────────────────────────
+   PROGRESS & COUNTER
+──────────────────────────────────────────────── */
+#progress-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: rgba(200,207,216,0.08);
+  z-index: 50;
+}
+#progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--or), transparent);
+  width: 0%;
+  transition: width 900ms cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 0 10px rgba(184,154,90,0.5);
+}
+
+#step-counter {
+  position: fixed;
+  top: 1.8rem; right: 2.5rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  letter-spacing: 0.35em;
+  color: rgba(200,207,216,0.3);
+  z-index: 50;
+  transition: opacity 600ms ease;
+}
+
+/* ────────────────────────────────────────────────
+   ÉCRANS (SCREENS)
+──────────────────────────────────────────────── */
+#app {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 700ms ease;
+}
+.screen.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ── Titres intro ── */
+.main-title {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(1.8rem,5vw,3.2rem);
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--blanc);
+  text-align: center;
+  line-height: 1.25;
+  margin-bottom: 1rem;
+  text-shadow: 0 0 80px rgba(184,154,90,0.15);
+}
+
+.subtitle {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: clamp(0.9rem,2.2vw,1.2rem);
+  color: rgba(200,207,216,0.5);
+  text-align: center;
+  max-width: 440px;
+  line-height: 1.9;
+  margin-bottom: 3.5rem;
+  letter-spacing: 0.04em;
+}
+
+/* ── Étiquette de question ── */
+.q-label {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(0.5rem,1.1vw,0.62rem);
+  letter-spacing: 0.45em;
+  color: var(--or);
+  text-align: center;
+  margin-bottom: 1.6rem;
+  opacity: 0.75;
+}
+
+/* ── Texte de question ── */
+.q-text {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(1.2rem,3.2vw,2rem);
+  font-weight: 300;
+  text-align: center;
+  max-width: 640px;
+  line-height: 1.6;
+  color: var(--blanc);
+  margin-bottom: 2.8rem;
+  letter-spacing: 0.02em;
+}
+
+/* ────────────────────────────────────────────────
+   CHOIX — ANIMATIONS VIVANTES
+──────────────────────────────────────────────── */
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  width: 100%;
+  max-width: 480px;
+}
+
+.choice-btn {
+  position: relative;
+  background: transparent;
+  border: 1px solid rgba(200,207,216,0.1);
+  color: rgba(200,207,216,0.75);
+  font-family: 'Raleway', sans-serif;
+  font-weight: 300;
+  font-size: clamp(0.78rem,1.7vw,0.9rem);
+  letter-spacing: 0.1em;
+  padding: 1rem 1.6rem;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  /* Flottement doux au repos */
+  animation: choice-float 5s ease-in-out infinite;
+  transition:
+    border-color 350ms ease,
+    color 350ms ease,
+    transform 300ms cubic-bezier(0.34,1.56,0.64,1),
+    box-shadow 350ms ease,
+    background 350ms ease;
+}
+
+/* Flottement vertical décalé par enfant */
+.choice-btn:nth-child(1) { animation-delay: 0s; }
+.choice-btn:nth-child(2) { animation-delay: 0.9s; }
+.choice-btn:nth-child(3) { animation-delay: 1.8s; }
+.choice-btn:nth-child(4) { animation-delay: 2.7s; }
+
+@keyframes choice-float {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+/* Éclat de lumière qui traverse le bouton au hover */
+.choice-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -80%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(184,154,90,0.08) 50%,
+    transparent 100%);
+  transform: skewX(-15deg);
+  transition: left 500ms ease;
+}
+
+/* Lueur de bord gauche */
+.choice-btn::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 20%; bottom: 20%;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent, rgba(184,154,90,0.5), transparent);
+  opacity: 0;
+  transition: opacity 350ms ease;
+}
+
+.choice-btn:hover {
+  animation: none; /* arrête le float au hover */
+  border-color: rgba(184,154,90,0.3);
+  color: var(--blanc);
+  transform: translateX(5px);
+  box-shadow:
+    0 0 25px rgba(184,154,90,0.07),
+    inset 0 0 25px rgba(184,154,90,0.03);
+}
+.choice-btn:hover::before { left: 120%; }
+.choice-btn:hover::after  { opacity: 1; }
+
+/* État sélectionné */
+.choice-btn.selected {
+  animation: selected-breathe 3s ease-in-out infinite;
+  border-color: rgba(184,154,90,0.55);
+  color: var(--or-pale);
+  background: rgba(184,154,90,0.06);
+  transform: translateX(5px);
+  box-shadow:
+    0 0 35px rgba(184,154,90,0.1),
+    inset 0 0 30px rgba(184,154,90,0.05),
+    0 0 0 1px rgba(184,154,90,0.08);
+}
+
+@keyframes selected-breathe {
+  0%,100% { box-shadow: 0 0 35px rgba(184,154,90,0.10), inset 0 0 30px rgba(184,154,90,0.05); }
+  50%      { box-shadow: 0 0 50px rgba(184,154,90,0.18), inset 0 0 40px rgba(184,154,90,0.08); }
+}
+
+/* Shimmer qui traverse le bouton sélectionné */
+.choice-btn.selected::before {
+  left: -80%;
+  animation: shimmer-loop 2.5s ease-in-out 0.3s infinite;
+}
+@keyframes shimmer-loop {
+  0%   { left: -80%; }
+  100% { left: 140%; }
+}
+.choice-btn.selected::after { opacity: 1; }
+
+.choice-letter {
+  font-family: 'Cinzel', serif;
+  font-size: 0.55rem;
+  letter-spacing: 0.2em;
+  color: var(--or);
+  margin-right: 0.9rem;
+  opacity: 0.6;
+  transition: opacity 300ms ease;
+}
+.choice-btn:hover .choice-letter,
+.choice-btn.selected .choice-letter { opacity: 1; }
+
+/* ────────────────────────────────────────────────
+   BOUTON PRINCIPAL
+──────────────────────────────────────────────── */
+.btn-primary {
+  margin-top: 2.2rem;
+  background: transparent;
+  border: 1px solid rgba(184,154,90,0.35);
+  color: var(--or-pale);
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.45em;
+  padding: 1rem 3rem;
+  cursor: pointer;
+  transition: all 450ms ease;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg,
+    rgba(184,154,90,0) 0%, rgba(184,154,90,0.08) 100%);
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+.btn-primary:hover:not(:disabled) {
+  border-color: var(--or);
+  letter-spacing: 0.55em;
+  box-shadow: 0 0 45px rgba(184,154,90,0.12);
+}
+.btn-primary:hover:not(:disabled)::after { opacity: 1; }
+.btn-primary:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+/* ────────────────────────────────────────────────
+   SÉPARATEUR
+──────────────────────────────────────────────── */
+.sep {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  margin: 0.5rem 0;
+}
+.sep::before,.sep::after {
+  content: '';
+  width: 100px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(184,154,90,0.25), transparent);
+}
+.sep-gem {
+  width: 4px; height: 4px;
+  background: var(--or);
+  transform: rotate(45deg);
+  opacity: 0.4;
+}
+
+/* ────────────────────────────────────────────────
+   ÉCRAN RÉSULTAT
+──────────────────────────────────────────────── */
+.result-wrap {
+  text-align: center;
+  max-width: 580px;
+  width: 100%;
+}
+
+.result-arch {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(1.5rem,4.5vw,2.8rem);
+  color: var(--or-pale);
+  letter-spacing: 0.18em;
+  margin-bottom: 0.4rem;
+  text-shadow: 0 0 50px rgba(184,154,90,0.3);
+}
+
+.result-desc {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: clamp(0.95rem,2.3vw,1.25rem);
+  color: rgba(200,207,216,0.55);
+  margin-bottom: 2rem;
+  line-height: 1.7;
+}
+
+.result-recap {
+  border-top: 1px solid rgba(200,207,216,0.07);
+  padding-top: 1.4rem;
+  margin-bottom: 1.8rem;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.recap-row {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+.recap-row .r-q {
+  font-family: 'Cinzel', serif;
+  font-size: 0.55rem;
+  letter-spacing: 0.2em;
+  color: rgba(184,154,90,0.45);
+  min-width: 90px;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+.recap-row .r-a {
+  color: rgba(200,207,216,0.65);
+  font-family: 'Raleway', sans-serif;
+  font-weight: 300;
+  line-height: 1.5;
+}
+
+/* Email */
+.email-section {
+  width: 100%;
+  text-align: center;
+}
+.email-lbl {
+  display: block;
+  font-family: 'Cinzel', serif;
+  font-size: 0.55rem;
+  letter-spacing: 0.35em;
+  color: rgba(184,154,90,0.55);
+  margin-bottom: 0.7rem;
+}
+.email-input {
+  width: 100%;
+  max-width: 380px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(200,207,216,0.18);
+  color: var(--blanc);
+  font-family: 'Raleway', sans-serif;
+  font-weight: 300;
+  font-size: 0.88rem;
+  letter-spacing: 0.1em;
+  padding: 0.7rem 0.4rem;
+  text-align: center;
+  outline: none;
+  transition: border-color 400ms ease;
+}
+.email-input::placeholder { color: rgba(200,207,216,0.2); }
+.email-input:focus { border-bottom-color: rgba(184,154,90,0.45); }
+
+/* ────────────────────────────────────────────────
+   ANIMATIONS D'ENTRÉE PAR ÉCRAN
+──────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.screen.active .q-label      { animation: fade-up 600ms 80ms  both ease; }
+.screen.active .q-text        { animation: fade-up 600ms 220ms both ease; }
+.screen.active .choices       { animation: fade-up 600ms 380ms both ease; }
+.screen.active .btn-primary   { animation: fade-up 600ms 520ms both ease; }
+.screen.active .main-title    { animation: fade-up 700ms 180ms both ease; }
+.screen.active .subtitle      { animation: fade-up 700ms 360ms both ease; }
+.screen.active .sep           { animation: fade-up 700ms 460ms both ease; }
+.screen.active .result-arch   { animation: fade-up 700ms 80ms  both ease; }
+.screen.active .result-desc   { animation: fade-up 700ms 230ms both ease; }
+.screen.active .result-recap  { animation: fade-up 700ms 420ms both ease; }
+.screen.active .email-section { animation: fade-up 700ms 580ms both ease; }
+
+/* ────────────────────────────────────────────────
+   RESPONSIVE
+──────────────────────────────────────────────── */
+@media (max-width: 580px) {
+  .q-text { font-size: 1.15rem; }
+  .choices { gap: 0.6rem; }
+  .choice-btn { padding: 0.9rem 1.2rem; font-size: 0.8rem; }
+  .btn-primary { font-size: 0.55rem; padding: 0.9rem 2rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════
+     COUCHE 1 — SCÈNE (simulation CSS)
+═════════════════════════════════════════════════ -->
+<div id="scene">
+  <div class="bg-sim active" id="bg-0">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+  <div class="bg-sim" id="bg-1">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+  <div class="bg-sim" id="bg-2">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+  <div class="bg-sim" id="bg-3">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+  <div class="bg-sim" id="bg-4">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+  <div class="bg-sim" id="bg-5">
+    <div class="orb"></div><div class="orb"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     COUCHE 2 — BRUME
+═════════════════════════════════════════════════ -->
+<div id="fog-layer"></div>
+<div class="horizon-glow"></div>
+
+<!-- ══════════════════════════════════════════════
+     UI
+═════════════════════════════════════════════════ -->
+<div id="progress-bar"><div id="progress-fill"></div></div>
+<div id="step-counter"></div>
+
+<div id="app">
+
+  <!-- ── INTRO ── -->
+  <div class="screen active" id="screen-0">
+    <p class="q-label">Grandeur Nature</p>
+    <h1 class="main-title">Découvrez<br>votre profil</h1>
+    <p class="subtitle">
+      Une courte expérience pour révéler<br>
+      le joueur que vous êtes vraiment.
+    </p>
+    <div class="sep"><div class="sep-gem"></div></div>
+    <button class="btn-primary" onclick="nextStep()">Commencer l'expérience</button>
+  </div>
+
+  <!-- ── QUESTION 1 ── -->
+  <div class="screen" id="screen-1">
+    <p class="q-label">Révélation I / IV</p>
+    <h2 class="q-text">
+      Vous entrez dans la forêt.<br>
+      Qu'est-ce qui attire votre regard en premier?
+    </h2>
+    <div class="choices">
+      <button class="choice-btn"
+        data-step="1"
+        data-value="Environnement"
+        data-label="Les détails du décor — textures, lumière, géographie">
+        <span class="choice-letter">A</span>
+        Les détails du décor — textures, lumière, géographie
+      </button>
+      <button class="choice-btn"
+        data-step="1"
+        data-value="Stratégie"
+        data-label="Les chemins et les sorties possibles">
+        <span class="choice-letter">B</span>
+        Les chemins et les sorties possibles
+      </button>
+      <button class="choice-btn"
+        data-step="1"
+        data-value="Collectif"
+        data-label="Le coin le plus confortable pour le groupe">
+        <span class="choice-letter">C</span>
+        Le coin le plus confortable pour le groupe
+      </button>
+      <button class="choice-btn"
+        data-step="1"
+        data-value="Action"
+        data-label="Le premier obstacle à franchir">
+        <span class="choice-letter">D</span>
+        Le premier obstacle à franchir
+      </button>
+    </div>
+    <button class="btn-primary" id="btn-1" onclick="nextStep()" disabled>Continuer</button>
+  </div>
+
+  <!-- ── QUESTION 2 ── -->
+  <div class="screen" id="screen-2">
+    <p class="q-label">Révélation II / IV</p>
+    <h2 class="q-text">
+      Une décision doit être prise rapidement.<br>
+      Quelle est votre première réaction?
+    </h2>
+    <div class="choices">
+      <button class="choice-btn"
+        data-step="2"
+        data-value="Instinct"
+        data-label="Je fais confiance à mon instinct — il ne me trahit pas">
+        <span class="choice-letter">A</span>
+        Je fais confiance à mon instinct — il ne me trahit pas
+      </button>
+      <button class="choice-btn"
+        data-step="2"
+        data-value="Analyse"
+        data-label="Je rassemble rapidement les informations disponibles">
+        <span class="choice-letter">B</span>
+        Je rassemble rapidement les informations disponibles
+      </button>
+      <button class="choice-btn"
+        data-step="2"
+        data-value="Consensus"
+        data-label="Je consulte les autres avant de trancher">
+        <span class="choice-letter">C</span>
+        Je consulte les autres avant de trancher
+      </button>
+      <button class="choice-btn"
+        data-step="2"
+        data-value="Patience"
+        data-label="Je prends le temps — rien ne sert de se précipiter">
+        <span class="choice-letter">D</span>
+        Je prends le temps — rien ne sert de se précipiter
+      </button>
+    </div>
+    <button class="btn-primary" id="btn-2" onclick="nextStep()" disabled>Continuer</button>
+  </div>
+
+  <!-- ── QUESTION 3 ── -->
+  <div class="screen" id="screen-3">
+    <p class="q-label">Révélation III / IV</p>
+    <h2 class="q-text">
+      Votre équipe fait face à un obstacle imprévu.<br>
+      Quel rôle endossez-vous naturellement?
+    </h2>
+    <div class="choices">
+      <button class="choice-btn"
+        data-step="3"
+        data-value="Meneur"
+        data-label="Je prends les devants et propose un plan">
+        <span class="choice-letter">A</span>
+        Je prends les devants et propose un plan
+      </button>
+      <button class="choice-btn"
+        data-step="3"
+        data-value="Soutien"
+        data-label="Je soutiens ceux qui en ont besoin — la cohésion prime">
+        <span class="choice-letter">B</span>
+        Je soutiens ceux qui en ont besoin — la cohésion prime
+      </button>
+      <button class="choice-btn"
+        data-step="3"
+        data-value="Ingénieur"
+        data-label="Je cherche la solution technique ou créative">
+        <span class="choice-letter">C</span>
+        Je cherche la solution technique ou créative
+      </button>
+      <button class="choice-btn"
+        data-step="3"
+        data-value="Éclaireur"
+        data-label="Je pars explorer les options avant que le groupe décide">
+        <span class="choice-letter">D</span>
+        Je pars explorer les options avant que le groupe décide
+      </button>
+    </div>
+    <button class="btn-primary" id="btn-3" onclick="nextStep()" disabled>Continuer</button>
+  </div>
+
+  <!-- ── QUESTION 4 ── -->
+  <div class="screen" id="screen-4">
+    <p class="q-label">Révélation IV / IV</p>
+    <h2 class="q-text">
+      L'aventure touche à sa fin.<br>
+      Qu'est-ce que vous ramenez avec vous?
+    </h2>
+    <div class="choices">
+      <button class="choice-btn"
+        data-step="4"
+        data-value="Mémoires"
+        data-label="Des souvenirs et des émotions gravés en moi">
+        <span class="choice-letter">A</span>
+        Des souvenirs et des émotions gravés en moi
+      </button>
+      <button class="choice-btn"
+        data-step="4"
+        data-value="Apprentissages"
+        data-label="Des leçons concrètes pour la prochaine fois">
+        <span class="choice-letter">B</span>
+        Des leçons concrètes pour la prochaine fois
+      </button>
+      <button class="choice-btn"
+        data-step="4"
+        data-value="Liens"
+        data-label="Des connexions et de nouvelles amitiés">
+        <span class="choice-letter">C</span>
+        Des connexions et de nouvelles amitiés
+      </button>
+      <button class="choice-btn"
+        data-step="4"
+        data-value="Victoire"
+        data-label="La satisfaction pure de mes dépassements">
+        <span class="choice-letter">D</span>
+        La satisfaction pure de mes dépassements
+      </button>
+    </div>
+    <button class="btn-primary" id="btn-4" onclick="showResult()" disabled>Révéler mon profil</button>
+  </div>
+
+  <!-- ── RÉSULTAT ── -->
+  <div class="screen" id="screen-5">
+    <div class="result-wrap">
+      <p class="q-label">Votre profil</p>
+      <h2 class="result-arch" id="result-arch">—</h2>
+      <p class="result-desc" id="result-desc">—</p>
+      <div class="sep"><div class="sep-gem"></div></div>
+      <div class="result-recap" id="result-recap"></div>
+      <div class="email-section">
+        <span class="email-lbl">Recevoir votre profil complet par courriel</span>
+        <input class="email-input" id="email-input"
+          type="email" placeholder="votre@courriel.com">
+        <button class="btn-primary" style="margin-top:1.4rem"
+          onclick="submitData(event)">
+          Envoyer
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ══════════════════════════════════════════════
+     SCRIPTS
+═════════════════════════════════════════════════ -->
+<script>
+
+/* ════════════════════════════════════════════════════
+   0. BRUME AMBIANTE — particules
+═══════════════════════════════════════════════════ */
+(function spawnWisps() {
+  for (let i = 0; i < 5; i++) {
+    const w = document.createElement('div');
+    w.className = 'fog-wisp';
+    const h = 150 + Math.random() * 250;
+    w.style.cssText = `
+      width: ${h}px; height: ${h * 0.35}px;
+      top: ${15 + Math.random() * 65}%;
+      animation-duration: ${50 + Math.random() * 40}s;
+      animation-delay: ${-Math.random() * 80}s;
+      background: rgba(160,175,195,1);
+    `;
+    document.body.appendChild(w);
+  }
+})();
+
+/* ════════════════════════════════════════════════════
+   1. ÉTAT DE L'APPLICATION
+═══════════════════════════════════════════════════ */
+const state = {
+  step: 0,
+  totalQ: 4,
+  answers: {} /* { 1: {question, value, label}, ... } */
+};
+
+const questionLabels = {
+  1: 'Premier regard',
+  2: 'Face au temps',
+  3: 'Rôle naturel',
+  4: 'Ce que vous ramenez'
+};
+
+const archetypes = {
+  Environnement:  { name: 'L\'Explorateur Sensoriel', desc: 'Attentif à chaque détail, vous trouvez la magie là où les autres ne regardent pas.' },
+  Stratégie:      { name: 'Le Tacticien',             desc: 'Votre esprit cartographie l\'espace avant même que vous n\'agissiez.' },
+  Collectif:      { name: 'Le Gardien',               desc: 'Le bien-être du groupe est votre boussole naturelle — et votre force.' },
+  Action:         { name: 'Le Pionnier',              desc: 'Les obstacles ne vous arrêtent pas : ils révèlent ce que vous valez.' },
+  Instinct:       { name: 'L\'Intuitif',              desc: 'Vous agissez depuis un lieu profond que la logique seule n\'explique pas.' },
+  Analyse:        { name: 'L\'Analyste',              desc: 'La clarté de l\'information est votre plus grand avantage.' },
+  Consensus:      { name: 'Le Diplomate',             desc: 'Vous savez que les meilleures décisions émergent du collectif.' },
+  Patience:       { name: 'Le Patient Stratège',      desc: 'Votre force réside dans le temps et le recul que vous vous accordez.' },
+  Meneur:         { name: 'Le Leader',                desc: 'Naturellement, vous tracez le chemin — et les autres le suivent.' },
+  Soutien:        { name: 'L\'Ancre',                 desc: 'Votre présence stabilise le groupe quand la tempête arrive.' },
+  Ingénieur:      { name: 'L\'Innovateur',            desc: 'Là où les autres voient un mur, vous voyez un puzzle à résoudre.' },
+  Éclaireur:      { name: 'L\'Éclaireur',             desc: 'Votre rôle : voir plus loin que les autres, et revenir avec la carte.' },
+  Mémoires:       { name: 'Le Conteur',               desc: 'Vous vivez pleinement — et vous gardez tout, pour le transmettre.' },
+  Apprentissages: { name: 'Le Sage',                  desc: 'Chaque aventure est une école. Vous ne passez jamais deux fois par la même porte.' },
+  Liens:          { name: 'Le Tisseur',               desc: 'Les personnes que vous rencontrez changent votre vie autant que les lieux.' },
+  Victoire:       { name: 'Le Dépasseur',             desc: 'Vous vous battez contre vos propres limites — et vous gagnez souvent.' }
+};
+
+/* ════════════════════════════════════════════════════
+   2. VIDÉO — ARCHITECTURE 3 SLOTS
+   ─────────────────────────────────────────────────
+   Branche tes vidéos Cloudinary ici.
+   Chaque étape a : loop (joue en boucle) + transition
+   (joue une seule fois pour passer à la suivante).
+
+   Format Cloudinary :
+   https://res.cloudinary.com/TON_CLOUD/video/upload/TON_ID.mp4
+
+   Séquence automatique :
+   1. loop[i] joue en boucle pendant la question
+   2. Réponse donnée → transition[i] se lance par-dessus
+   3. transition[i] se termine → loop[i+1] prend le relais
+═══════════════════════════════════════════════════ */
+const VIDEO_CONFIG = [
+  {                                  /* Étape 0 — intro         */
+    loop:       'https://vimeo.com/1182101056?share=copy&fl=sv&fe=ci',                  /* Ex: '.../loop_plage.mp4' */
+    transition: 'https://vimeo.com/1182101072?share=copy&fl=sv&fe=ci'                   /* Ex: '.../trans_plage_foret.mp4' */
+  },
+  {                                  /* Étape 1 — question 1    */
+    loop:       'https://vimeo.com/1182101072?share=copy&fl=sv&fe=ci',
+    transition: 'https://vimeo.com/1182101092?share=copy&fl=sv&fe=ci'
+  },
+  {                                  /* Étape 2 — question 2    */
+    loop:       '',
+    transition: ''
+  },
+  {                                  /* Étape 3 — question 3    */
+    loop:       '',
+    transition: ''
+  },
+  {                                  /* Étape 4 — question 4    */
+    loop:       '',
+    transition: ''
+  },
+  {                                  /* Étape 5 — résultat      */
+    loop:       '',
+    transition: ''
+  }
+];
+
+/*
+  ── Pour activer les vidéos ────────────────────────────────────────
+  1. Ajoute dans le HTML (après #scene) :
+
+  <video id="vid-loop-a"  class="vid-slot" loop muted playsinline autoplay></video>
+  <video id="vid-trans"   class="vid-slot" muted playsinline></video>
+  <video id="vid-loop-b"  class="vid-slot" loop muted playsinline></video>
+
+  2. Décommente le bloc VideoManager ci-dessous et remplace
+     switchBackground() par videoMgr.goTo(index).
+  ──────────────────────────────────────────────────────────────────
+
+  class VideoManager {
+  constructor() {
+    this.loopA = document.getElementById('vid-loop-a');
+    this.trans = document.getElementById('vid-trans');
+    this.loopB = document.getElementById('vid-loop-b');
+    this.currentLoop = this.loopA;
+    this.nextLoop = this.loopB;
+    this.pendingStep = null;
+    this.trans.addEventListener('ended', () => this._onTransEnd());
+  }
+
+  goTo(stepIndex) {
+    const cfg = VIDEO_CONFIG[stepIndex];
+    if (!cfg || !cfg.loop) return; // pas de vidéo configurée
+
+    // Préparer la vidéo de transition
+    if (cfg.transition) {
+      this.trans.src = cfg.transition;
+      this.trans.load();
+    }
+
+    // Préparer le prochain loop
+    this.nextLoop.src = cfg.loop;
+    this.nextLoop.load();
+    this.nextLoop.play();
+    this.nextLoop.style.opacity = '0';
+
+    if (cfg.transition) {
+      // Lancer la transition par-dessus le loop actuel
+      this.trans.currentTime = 0;
+      this.trans.play();
+      this.trans.style.opacity = '1';
+      this.currentLoop.style.opacity = '0';
+    } else {
+      // Pas de vidéo de transition : crossfade direct
+      this._swap();
+    }
+  }
+
+  _onTransEnd() {
+    this.trans.style.opacity = '0';
+    this._swap();
+  }
+
+  _swap() {
+    this.nextLoop.style.opacity = '1';
+    this.currentLoop.pause();
+    [this.currentLoop, this.nextLoop] = [this.nextLoop, this.currentLoop];
+  }
+}
+const videoMgr = new VideoManager();
+*/
+
+/* ════════════════════════════════════════════════════
+   3. NAVIGATION — fonds CSS (simulation)
+═══════════════════════════════════════════════════ */
+function switchBackground(idx) {
+  document.querySelectorAll('.bg-sim')
+    .forEach((el,i) => el.classList.toggle('active', i === idx));
+  /* En production avec vidéos : videoMgr.goTo(idx); */
+}
+
+function updateProgress() {
+  const pct = state.step === 0 ? 0
+    : state.step > state.totalQ ? 100
+    : (state.step / state.totalQ) * 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function updateCounter() {
+  const el = document.getElementById('step-counter');
+  if (state.step >= 1 && state.step <= state.totalQ) {
+    el.textContent = `${state.step} — ${state.totalQ}`;
+    el.style.opacity = '1';
+  } else {
+    el.style.opacity = '0';
+  }
+}
+
+function goToScreen(idx) {
+  document.querySelector('.screen.active')?.classList.remove('active');
+  document.getElementById(`screen-${idx}`)?.classList.add('active');
+  switchBackground(idx);
+  updateProgress();
+  updateCounter();
+}
+
+function nextStep() {
+  state.step++;
+  goToScreen(state.step);
+}
+
+/* ════════════════════════════════════════════════════
+   4. SÉLECTION D'UN CHOIX
+═══════════════════════════════════════════════════ */
+function selectChoice(btn) {
+  const step  = parseInt(btn.dataset.step, 10);
+  const value = btn.dataset.value;
+  const label = btn.dataset.label;
+
+  /* Déselectionner les autres */
+  btn.closest('.choices').querySelectorAll('.choice-btn')
+    .forEach(b => b.classList.remove('selected'));
+
+  btn.classList.add('selected');
+  state.answers[step] = { question: questionLabels[step], value, label };
+
+  /* Activer le bouton suivant */
+  const nextBtn = document.getElementById(`btn-${step}`);
+  if (nextBtn) nextBtn.disabled = false;
+
+  /* Déclencher l'effet mist */
+  spawnMistBurst(btn);
+}
+
+/* Délégation d'événements sur les choix (plus robuste que onclick inline) */
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.choice-btn');
+  if (btn) selectChoice(btn);
+});
+
+/* ════════════════════════════════════════════════════
+   5. EFFET MIST BURST — Anneaux + Particules
+═══════════════════════════════════════════════════ */
+function spawnMistBurst(element) {
+  const rect = element.getBoundingClientRect();
+  const cx   = rect.left + rect.width  / 2;
+  const cy   = rect.top  + rect.height / 2;
+
+  /* Anneaux elliptiques qui s'expandent */
+  for (let i = 0; i < 3; i++) {
+    const ring = document.createElement('div');
+    ring.className = 'mist-ring';
+    ring.style.cssText = `
+      left: ${cx}px;
+      top: ${cy}px;
+      animation-delay: ${i * 110}ms;
+    `;
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 1100 + i * 110);
+  }
+
+  /* Particules lumineuses */
+  const colors = [
+    'rgba(220,230,250,0.9)',
+    'rgba(200,215,235,0.7)',
+    'rgba(184,154,90,0.6)',
+    'rgba(210,225,245,0.5)'
+  ];
+  for (let i = 0; i < 16; i++) {
+    const p = document.createElement('div');
+    p.className = 'sel-particle';
+    const angle = (Math.PI * 2 / 16) * i + (Math.random() - 0.5) * 0.5;
+    const dist  = 25 + Math.random() * 65;
+    const dx    = Math.cos(angle) * dist;
+    const dy    = Math.sin(angle) * dist - 20; /* légèrement vers le haut */
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const size  = 2 + Math.random() * 2.5;
+    p.style.cssText = `
+      left: ${cx}px;
+      top: ${cy}px;
+      width: ${size}px;
+      height: ${size}px;
+      background: ${color};
+      --dx: ${dx}px;
+      --dy: ${dy}px;
+      animation-duration: ${350 + Math.random() * 350}ms;
+      animation-delay: ${Math.random() * 80}ms;
+      box-shadow: 0 0 4px ${color};
+    `;
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 900);
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   6. RÉSULTAT
+═══════════════════════════════════════════════════ */
+function showResult() {
+  const firstValue = state.answers[1]?.value || 'Action';
+  const arch = archetypes[firstValue] || archetypes['Action'];
+
+  document.getElementById('result-arch').textContent = arch.name;
+  document.getElementById('result-desc').textContent = arch.desc;
+
+  const recap = document.getElementById('result-recap');
+  recap.innerHTML = '';
+  Object.values(state.answers).forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'recap-row';
+    row.innerHTML = `<span class="r-q">${a.question}</span>
+                     <span class="r-a">${a.label}</span>`;
+    recap.appendChild(row);
+  });
+
+  state.step = 5;
+  goToScreen(5);
+}
+
+/* ════════════════════════════════════════════════════
+   7. COLLECTE DE DONNÉES — Google Apps Script (GRATUIT)
+   ──────────────────────────────────────────────────
+   CONFIGURATION UNIQUE (5 minutes) :
+
+   a) Ouvre le Google Sheet où tu veux recevoir les données.
+   b) Menu : Extensions → Apps Script
+   c) Remplace tout le code par :
+
+      function doPost(e) {
+        const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+        const data  = JSON.parse(e.postData.contents);
+        sheet.appendRow([
+          new Date(),
+          data.email      || '',
+          data.archetype  || '',
+          data.q1 || '', data.q2 || '',
+          data.q3 || '', data.q4 || '',
+          data.fullJson   || ''
+        ]);
+        return ContentService
+          .createTextOutput(JSON.stringify({ status: 'ok' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+   d) Clique "Déployer" → "Nouveau déploiement"
+      Type : Application Web
+      Exécuter en tant que : Moi
+      Accès : Tout le monde
+   e) Copie l'URL de déploiement → remplace GOOGLE_SCRIPT_URL ci-dessous
+
+   Aucun abonnement, aucun frais. Les données arrivent dans ton Sheet.
+═══════════════════════════════════════════════════ */
+const GOOGLE_SCRIPT_URL = ''; /* ← Colle ton URL ici */
+
+function submitData(event) {
+  const email = document.getElementById('email-input').value.trim();
+  const arch  = document.getElementById('result-arch').textContent;
+  const btn   = event.target;
+
+  const payload = {
+    email,
+    archetype: arch,
+    q1: state.answers[1]?.label || '',
+    q2: state.answers[2]?.label || '',
+    q3: state.answers[3]?.label || '',
+    q4: state.answers[4]?.label || '',
+    fullJson: JSON.stringify(state.answers),
+    timestamp: new Date().toISOString()
+  };
+
+  /* Debug : les données s'affichent dans la console du navigateur */
+  console.log('📤 Données à envoyer :', payload);
+
+  if (GOOGLE_SCRIPT_URL) {
+    /* mode: 'no-cors' contourne les restrictions CORS depuis un iframe */
+    fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch(err => console.warn('Envoi échoué :', err));
+  } else {
+    console.warn('⚠️ GOOGLE_SCRIPT_URL non configurée — données non envoyées.');
+  }
+
+  /* Feedback visuel */
+  btn.textContent = 'Profil envoyé  ✦';
+  btn.disabled    = true;
+  btn.style.opacity = '0.5';
+}
+
+/* ════════════════════════════════════════════════════
+   8. INIT
+═══════════════════════════════════════════════════ */
+updateCounter();
+
+</script>
+</body>
+</html>
