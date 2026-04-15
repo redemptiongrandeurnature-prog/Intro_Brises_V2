@@ -14,12 +14,13 @@
 ║     → Cherche  ═══ CONFIG VIDÉOS ═══  dans le JS                ║
 ║     → Remplace les IDs Vimeo par les tiens                       ║
 ║                                                                  ║
-║  2. CHANGER LES QUESTIONS / CHOIX                                ║
+║  2. CHANGER LES QUESTIONS / CHOIX / COMMENTAIRES                 ║
 ║     → Cherche  ═══ CONFIG QUESTIONS ═══  dans le JS             ║
 ║     → Modifie le tableau QUESTIONS[]                             ║
+║     → Chaque choix a un champ "feedback" (texte pendant trans.)  ║
 ║                                                                  ║
 ║  3. AJOUTER DES QUESTIONS                                        ║
-║     → Ajoute un objet dans QUESTIONS[]                          ║
+║     → Ajoute un objet dans QUESTIONS[]                           ║
 ║     → Ajoute une section de vidéos dans VIDEO_SCENES[]           ║
 ║     → Le reste est automatique                                   ║
 ║                                                                  ║
@@ -76,12 +77,12 @@ html, body {
    COUCHE 1 — VIDÉOS VIMEO (3 slots)
 
    Architecture :
-   ┌─ slot-loop-a ─┐  Boucle active (visible)
+   ┌─ slot-loop-a ─┐  Boucle A (alterne avec B)
    ├─ slot-trans   ┤  Transition (joue une fois)
-   └─ slot-loop-b ─┘  Prochaine boucle (précharge)
+   └─ slot-loop-b ─┘  Boucle B (alterne avec A)
 
-   Les slots changent de visibilité par opacité CSS.
-   Le VideoManager JS orchestre quoi jouer et quand.
+   Les z-index sont gérés dynamiquement en JS.
+   CSS s'occupe uniquement du fade opacity.
 ═══════════════════════════════════════════════ */
 #scene {
   position: fixed;
@@ -95,31 +96,40 @@ html, body {
   inset: 0;
   overflow: hidden;
   opacity: 0;
-  /* Fondu plus lent pour les loops, plus rapide géré en JS pour les transitions */
   transition: opacity 1200ms cubic-bezier(0.4, 0, 0.2, 1);
   pointer-events: none;
 }
-.vid-slot.active  { opacity: 1; }
-.vid-slot.instant { transition: opacity 200ms ease; } /* pour la fin */
+.vid-slot.active { opacity: 1; }
 
 /*
-  L'iframe créée par le Vimeo Player SDK s'insère dans .vid-slot.
-  Ce CSS lui applique un comportement "cover" (comme object-fit:cover)
-  puisque CSS object-fit ne s'applique pas aux iframes.
+  iframe "cover" : object-fit:cover ne s'applique pas aux iframes,
+  on simule avec width/height en unités croisées vh/vw.
 */
 .vid-slot iframe,
 .vid-slot > div > iframe {
   position: absolute !important;
-  /* Trick 16:9 cover : la plus grande des deux dimensions "gagne" */
-  width:  177.78vh !important;  /* 100/9*16 */
+  width:  177.78vh !important;
   min-width: 100% !important;
-  height: 56.25vw !important;   /* 100/16*9 */
+  height: 56.25vw !important;
   min-height: 100% !important;
   top:  50% !important;
   left: 50% !important;
   transform: translate(-50%, -50%) !important;
   border: 0 !important;
   pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════
+   OVERLAY SEAMLESS LOOP FADE
+   Injecté dynamiquement dans chaque slot-loop.
+   Géré par VideoManager._watchLoop().
+═══════════════════════════════════════════════ */
+.loop-fade-overlay {
+  position: absolute; inset: 0;
+  background: var(--noir);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2; /* Au-dessus de l'iframe, dans le slot */
 }
 
 /* ═══════════════════════════════════════════════
@@ -131,7 +141,6 @@ html, body {
   z-index: 1;
   pointer-events: none;
 }
-/* Vignette sombre sur les bords */
 #fog::before {
   content: '';
   position: absolute; inset: 0;
@@ -140,7 +149,6 @@ html, body {
     rgba(0,0,0,0.42) 60%,
     rgba(0,0,0,0.82) 100%);
 }
-/* Nappe de brume en bas */
 #fog::after {
   content: '';
   position: absolute;
@@ -166,7 +174,6 @@ html, body {
   100% { opacity: 1;   transform: scaleX(1.12); }
 }
 
-/* Particules de brume flottantes */
 .wisp {
   position: fixed;
   border-radius: 50%;
@@ -176,14 +183,51 @@ html, body {
   opacity: 0;
 }
 @keyframes wisp-travel {
-  0%   { transform: translateX(-150px) translateY(4px);                   opacity: 0; }
+  0%   { transform: translateX(-150px) translateY(4px);                opacity: 0; }
   8%   { opacity: 0.055; }
   92%  { opacity: 0.03; }
-  100% { transform: translateX(calc(100vw + 150px)) translateY(-18px);    opacity: 0; }
+  100% { transform: translateX(calc(100vw + 150px)) translateY(-18px); opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════════
-   CHARGEMENT — indicateur discret
+   COMMENTAIRE DE TRANSITION
+   Apparaît pendant une vidéo de transition.
+   Affiche le feedback lié à la réponse choisie.
+═══════════════════════════════════════════════ */
+#transition-commentary {
+  position: fixed;
+  bottom: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  width: 90%;
+  max-width: 580px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 800ms ease;
+}
+#transition-commentary.active { opacity: 1; }
+
+.trans-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.46rem;
+  letter-spacing: 0.52em;
+  color: rgba(184,154,90,0.38);
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+}
+.trans-text {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: clamp(0.88rem, 2vw, 1.15rem);
+  color: rgba(200,207,216,0.5);
+  line-height: 1.85;
+  letter-spacing: 0.04em;
+}
+
+/* ═══════════════════════════════════════════════
+   CHARGEMENT
 ═══════════════════════════════════════════════ */
 #loading {
   position: fixed; inset: 0; z-index: 100;
@@ -299,7 +343,6 @@ html, body {
   0%,100% { transform: translateY(0); }
   50%      { transform: translateY(-3px); }
 }
-/* Reflet lumineux qui traverse */
 .choice-btn::before {
   content: '';
   position: absolute; top: 0; left: -80%; width: 60%; height: 100%;
@@ -307,7 +350,6 @@ html, body {
   transform: skewX(-12deg);
   transition: left 480ms ease;
 }
-/* Barre gauche */
 .choice-btn::after {
   content: '';
   position: absolute; left: 0; top: 18%; bottom: 18%; width: 1px;
@@ -420,7 +462,7 @@ html, body {
 .email-input::placeholder { color: rgba(200,207,216,0.18); }
 .email-input:focus { border-bottom-color: rgba(184,154,90,0.42); }
 
-/* ── Effet mist burst (sélection) ── */
+/* ── Effet mist burst ── */
 .mist-ring {
   position: fixed; border-radius: 50%;
   border: 1px solid rgba(210,225,245,0.55);
@@ -448,14 +490,14 @@ html, body {
   from { opacity: 0; transform: translateY(15px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.screen.active .q-label      { animation: fade-up 580ms 70ms  both ease; }
+.screen.active .q-label      { animation: fade-up 580ms  70ms both ease; }
 .screen.active .q-text        { animation: fade-up 580ms 210ms both ease; }
 .screen.active .choices       { animation: fade-up 580ms 360ms both ease; }
 .screen.active .btn-main      { animation: fade-up 580ms 500ms both ease; }
 .screen.active .main-title    { animation: fade-up 680ms 160ms both ease; }
 .screen.active .subtitle      { animation: fade-up 680ms 330ms both ease; }
 .screen.active .sep           { animation: fade-up 680ms 440ms both ease; }
-.screen.active .result-arch   { animation: fade-up 680ms 70ms  both ease; }
+.screen.active .result-arch   { animation: fade-up 680ms  70ms both ease; }
 .screen.active .result-desc   { animation: fade-up 680ms 220ms both ease; }
 .screen.active .result-recap  { animation: fade-up 680ms 400ms both ease; }
 .screen.active .email-wrap    { animation: fade-up 680ms 560ms both ease; }
@@ -480,9 +522,9 @@ html, body {
      COUCHE 1 — 3 SLOTS VIDÉO
 ════════════════════════════════════════ -->
 <div id="scene">
-  <div id="slot-loop-a" class="vid-slot"></div>  <!-- Boucle active    -->
-  <div id="slot-trans"  class="vid-slot"></div>  <!-- Transition       -->
-  <div id="slot-loop-b" class="vid-slot"></div>  <!-- Prochaine boucle -->
+  <div id="slot-loop-a" class="vid-slot"></div>
+  <div id="slot-trans"  class="vid-slot"></div>
+  <div id="slot-loop-b" class="vid-slot"></div>
 </div>
 
 <!-- ═══════════════════════════════════════
@@ -490,6 +532,16 @@ html, body {
 ════════════════════════════════════════ -->
 <div id="fog"></div>
 <div class="horizon"></div>
+
+<!-- ═══════════════════════════════════════
+     COMMENTAIRE DE TRANSITION (nouveau)
+     Visible uniquement pendant les vidéos
+     de transition, caché pendant les loops.
+════════════════════════════════════════ -->
+<div id="transition-commentary">
+  <p class="trans-label">votre chemin se révèle</p>
+  <p id="trans-commentary-text" class="trans-text"></p>
+</div>
 
 <!-- ═══════════════════════════════════════
      UI
@@ -545,63 +597,52 @@ html, body {
 /* ╔════════════════════════════════════════════════════════════╗
    ║  ═══ CONFIG VIDÉOS ═══                                    ║
    ║                                                           ║
-   ║  Chaque scène a une boucle (loop) et une transition.      ║
-   ║  La transition joue UNE FOIS quand on quitte la scène.    ║
-   ║  La boucle joue en continu pendant que la question        ║
-   ║  est affichée.                                            ║
-   ║                                                           ║
-   ║  Pour AJOUTER une scène :                                 ║
-   ║  1. Ajoute { loop: 'ID', trans: 'ID' } au tableau         ║
-   ║  2. Ajoute une question correspondante dans QUESTIONS      ║
+   ║  Chaque scène a :                                         ║
+   ║  • loop  : vidéo en boucle (pendant la question)         ║
+   ║  • trans : transition vers la scène suivante              ║
+   ║  La scène 0 a aussi "intro" (vidéo jouée au lancement).   ║
    ╚════════════════════════════════════════════════════════════╝ */
 const VIDEO_SCENES = [
   /* 0 — Intro (plage) */
   {
-    intro: '1182101031', /* Vidéo 1 : transition soleil → brisé plage (joue au lancement) */
-    loop:  '1182101056', /* Vidéo 2 : boucle brisé plage */
-    trans: '1182101072'  /* Vidéo 3 : transition plage → chemin (joue quand on répond Q1) */
+    intro: '1182101031', /* Vidéo  1 : transition soleil → plage (lancement) */
+    loop:  '1182101056', /* Vidéo  2 : boucle plage */
+    trans: '1182101072'  /* Vidéo  3 : transition plage → chemin (quand Q1 répondue) */
   },
   /* 1 — Question 1 (entrée du chemin) */
   {
-    loop:  '1182101079', /* Vidéo 4 : boucle entrée chemin */
-    trans: '1182101092'  /* Vidéo 5 : transition chemin → feu de camp */
+    loop:  '1182101079', /* Vidéo  4 : boucle entrée chemin */
+    trans: '1182101092'  /* Vidéo  5 : transition chemin → feu de camp */
   },
   /* 2 — Question 2 (feu de camp) */
   {
-    loop:  '1182101104', /* Vidéo 6 : boucle feu de camp */
-    trans: '1182101112'  /* Vidéo 7 : transition feu → croisée */
+    loop:  '1182101104', /* Vidéo  6 : boucle feu de camp */
+    trans: '1182101112'  /* Vidéo  7 : transition feu → croisée */
   },
   /* 3 — Question 3 (croisée des chemins) */
   {
-    loop:  '1182101129', /* Vidéo 8  : boucle croisée des chemins */
-    trans: '1182101136'  /* Vidéo 9  : transition croisée → ruines */
+    loop:  '1182101129', /* Vidéo  8 : boucle croisée des chemins */
+    trans: '1182101136'  /* Vidéo  9 : transition croisée → ruines */
   },
   /* 4 — Question 4 (ruines) */
   {
     loop:  '1182101149', /* Vidéo 10 : boucle ruines */
-    trans: '1182101163'  /* Vidéo 11 : transition ruines → portail (joue à l'arrivée résultat) */
+    trans: '1182101163'  /* Vidéo 11 : transition ruines → portail (à l'arrivée résultat) */
   },
   /* 5 — Résultat (portail) */
   {
     loop:  '1182101179', /* Vidéo 12 : boucle portail */
-    trans: '1182101185'  /* Vidéo 13 : transition portail → fin (joue au submit email) */
+    trans: '1182101185'  /* Vidéo 13 : transition portail → fin (au submit email) */
   }
 ];
+
 
 /* ╔════════════════════════════════════════════════════════════╗
    ║  ═══ CONFIG QUESTIONS ═══                                 ║
    ║                                                           ║
-   ║  Chaque question correspond à une scène vidéo.            ║
-   ║  La première question → VIDEO_SCENES[1]                   ║
-   ║  La deuxième question → VIDEO_SCENES[2]  etc.             ║
-   ║                                                           ║
-   ║  Structure d'un choix :                                   ║
-   ║  {                                                        ║
-   ║    label:  'Texte affiché au joueur',                     ║
-   ║    value:  'Identifiant interne (archétype clé)',          ║
-   ║    transOverride: 'ID_VIMEO', (optionnel, voir CHEMINS)   ║
-   ║    loopOverride:  'ID_VIMEO'  (optionnel, voir CHEMINS)   ║
-   ║  }                                                        ║
+   ║  Chaque choix peut avoir un champ "feedback" optionnel.   ║
+   ║  Ce texte s'affiche pendant la vidéo de transition qui    ║
+   ║  suit la question. Si omis, aucun texte n'est affiché.    ║
    ╚════════════════════════════════════════════════════════════╝ */
 const QUESTIONS = [
   /* ── Question 1 ─────────────────────────────── */
@@ -609,10 +650,26 @@ const QUESTIONS = [
     label: 'Révélation I / IV',
     text:  'Vous entrez dans la forêt.\nQu\'est-ce qui attire votre regard en premier?',
     choices: [
-      { value: 'Environnement', label: 'Les détails du décor — textures, lumière, géographie' },
-      { value: 'Stratégie',     label: 'Les chemins et les sorties possibles' },
-      { value: 'Collectif',     label: 'Le coin le plus confortable pour le groupe' },
-      { value: 'Action',        label: 'Le premier obstacle à franchir' }
+      {
+        value: 'Environnement',
+        label: 'Les détails du décor — textures, lumière, géographie',
+        feedback: 'Votre regard capte ce que les autres ignorent. Chaque ombre, chaque texture porte une histoire.'
+      },
+      {
+        value: 'Stratégie',
+        label: 'Les chemins et les sorties possibles',
+        feedback: 'Avant d\'agir, vous lisez l\'espace. Chaque angle, chaque sortie — rien ne vous échappe.'
+      },
+      {
+        value: 'Collectif',
+        label: 'Le coin le plus confortable pour le groupe',
+        feedback: 'Le bien-être du groupe passe avant le vôtre. C\'est là votre force tranquille.'
+      },
+      {
+        value: 'Action',
+        label: 'Le premier obstacle à franchir',
+        feedback: 'Rien ne vous arrête. Pour vous, l\'obstacle est le chemin lui-même.'
+      }
     ]
   },
   /* ── Question 2 ─────────────────────────────── */
@@ -620,10 +677,26 @@ const QUESTIONS = [
     label: 'Révélation II / IV',
     text:  'Une décision doit être prise rapidement.\nQuelle est votre première réaction?',
     choices: [
-      { value: 'Instinct',   label: 'Je fais confiance à mon instinct — il ne me trahit pas' },
-      { value: 'Analyse',    label: 'Je rassemble rapidement les informations disponibles' },
-      { value: 'Consensus',  label: 'Je consulte les autres avant de trancher' },
-      { value: 'Patience',   label: 'Je prends le temps — rien ne sert de se précipiter' }
+      {
+        value: 'Instinct',
+        label: 'Je fais confiance à mon instinct — il ne me trahit pas',
+        feedback: 'Votre boussole intérieure vous guide là où la logique hésite.'
+      },
+      {
+        value: 'Analyse',
+        label: 'Je rassemble rapidement les informations disponibles',
+        feedback: 'La clarté de l\'information est votre arme. Vous choisissez vite, et bien.'
+      },
+      {
+        value: 'Consensus',
+        label: 'Je consulte les autres avant de trancher',
+        feedback: 'Les meilleures décisions naissent du collectif. Vous le savez mieux que personne.'
+      },
+      {
+        value: 'Patience',
+        label: 'Je prends le temps — rien ne sert de se précipiter',
+        feedback: 'Dans le calme, la voie s\'éclaire. Votre force, c\'est le recul que vous vous accordez.'
+      }
     ]
   },
   /* ── Question 3 ─────────────────────────────── */
@@ -631,58 +704,104 @@ const QUESTIONS = [
     label: 'Révélation III / IV',
     text:  'Votre équipe fait face à un obstacle imprévu.\nQuel rôle endossez-vous naturellement?',
     choices: [
-      { value: 'Meneur',     label: 'Je prends les devants et propose un plan' },
-      { value: 'Soutien',    label: 'Je soutiens ceux qui en ont besoin — la cohésion prime' },
-      { value: 'Ingénieur',  label: 'Je cherche la solution technique ou créative' },
-      { value: 'Éclaireur',  label: 'Je pars explorer les options avant que le groupe décide' }
+      {
+        value: 'Meneur',
+        label: 'Je prends les devants et propose un plan',
+        feedback: 'Vous tracez le chemin. Les autres le suivent — naturellement, sans qu\'on le leur demande.'
+      },
+      {
+        value: 'Soutien',
+        label: 'Je soutiens ceux qui en ont besoin — la cohésion prime',
+        feedback: 'Votre présence est une ancre dans la tempête. La cohésion, c\'est votre don.'
+      },
+      {
+        value: 'Ingénieur',
+        label: 'Je cherche la solution technique ou créative',
+        feedback: 'Là où les autres voient un mur, vous voyez un puzzle à résoudre. Et vous le résolvez.'
+      },
+      {
+        value: 'Éclaireur',
+        label: 'Je pars explorer les options avant que le groupe décide',
+        feedback: 'Vous voyez plus loin que les autres. C\'est votre don, et votre responsabilité.'
+      }
     ]
   },
   /* ── Question 4 ─────────────────────────────── */
   {
     label: 'Révélation IV / IV',
+    text:  "Toutes les âmes sont brisées d'une certaine manière à Rédemption.\nQu'est-ce qui a brisé la vôtre?",
+    choices: [
+      {
+        value: 'Trahison',
+        label: 'Ce qu\'on m\'a fait était injuste.',
+        feedback: '!!!'
+      },
+      {
+        value: 'Destinée dérobée',
+        label: 'Vivez ici votre vie volée.',
+        feedback: '...'
+      },
+      {
+        value: 'Mystère',
+        label: 'Je... je ne m\'en souviens plus...',
+        feedback: '???'
+      },
+      {
+        value: 'Vie de tyran',
+        label: 'Je suis devenu le monstre que j\'avais juré de vaincre.',
+        feedback: 'Vous avez la chance de ne pas faire la même erreur une deuxième fois.'
+      }
+      
+    ]
+  },
+    /* ── Question 5 ─────────────────────────────── */
+  {
+    label: 'Révélation V / V',
     text:  "L'aventure touche à sa fin.\nQu'est-ce que vous ramenez avec vous?",
     choices: [
-      { value: 'Mémoires',        label: 'Des souvenirs et des émotions gravés en moi' },
-      { value: 'Apprentissages',  label: 'Des leçons concrètes pour la prochaine fois' },
-      { value: 'Liens',           label: 'Des connexions et de nouvelles amitiés' },
-      { value: 'Victoire',        label: 'La satisfaction pure de mes dépassements' }
+      {
+        value: 'Mémoires',
+        label: 'Des souvenirs et des émotions gravés en moi',
+        feedback: 'Ces instants sont gravés. Ils vous accompagneront longtemps après la fin du jeu.'
+      },
+      {
+        value: 'Apprentissages',
+        label: 'Des leçons concrètes pour la prochaine fois',
+        feedback: 'Chaque expérience devient sagesse entre vos mains. Vous ne passez jamais deux fois par la même porte.'
+      },
+      {
+        value: 'Liens',
+        label: 'Des connexions et de nouvelles amitiés',
+        feedback: 'Les liens forgés ici durent bien au-delà du jeu. C\'est le vrai trésor.'
+      },
+      {
+        value: 'Victoire',
+        label: 'La satisfaction pure de mes dépassements',
+        feedback: 'Vous avez repoussé vos propres limites. Voilà ce que vous êtes vraiment.'
+      }
+      
     ]
   }
 ];
 
+
 /* ╔════════════════════════════════════════════════════════════╗
-   ║  ═══ CONFIG CHEMINS ═══  (fonctionnalité "Choisissez      ║
-   ║  votre chemin")                                           ║
+   ║  ═══ CONFIG CHEMINS ═══                                   ║
    ║                                                           ║
-   ║  Par défaut, toutes les réponses d'une même question      ║
-   ║  mènent au même prochain décor (chemin linéaire).         ║
-   ║                                                           ║
-   ║  Pour créer des chemins différents selon la réponse :     ║
-   ║  - Clé : 'Q{numéro}_{value}'  (ex. 'Q1_Action')          ║
-   ║  - Valeur : { trans: 'ID_VIMEO', loop: 'ID_VIMEO' }      ║
-   ║                                                           ║
-   ║  Exemple (à décommenter et adapter) :                     ║
-   ║  'Q1_Action': {                                           ║
-   ║    trans: '123456789',  // vidéo de transition unique     ║
-   ║    loop:  '987654321'   // boucle unique pour ce chemin   ║
-   ║  }                                                        ║
-   ║                                                           ║
-   ║  Si une clé n'existe pas → chemin linéaire par défaut.   ║
+   ║  Par défaut : chemin linéaire (toutes réponses → même     ║
+   ║  prochaine scène). Pour des chemins différents :          ║
+   ║  'Q1_Action': { trans: 'ID_VIMEO', loop: 'ID_VIMEO' }    ║
    ╚════════════════════════════════════════════════════════════╝ */
 const CHEMINS = {
   /* Exemples (décommenter pour activer) :
-  'Q1_Action':       { trans: 'VIMEO_ID', loop: 'VIMEO_ID' },
-  'Q1_Stratégie':    { trans: 'VIMEO_ID', loop: 'VIMEO_ID' },
-  'Q4_Victoire':     { trans: 'VIMEO_ID', loop: 'VIMEO_ID' },
+  'Q1_Action':    { trans: 'VIMEO_ID', loop: 'VIMEO_ID' },
+  'Q4_Victoire':  { trans: 'VIMEO_ID', loop: 'VIMEO_ID' },
   */
 };
 
+
 /* ╔════════════════════════════════════════════════════════════╗
    ║  ═══ CONFIG ARCHETYPES ═══                                ║
-   ║                                                           ║
-   ║  La clé correspond au 'value' de la première réponse.     ║
-   ║  Tu peux étendre la logique dans calcArchetype() pour     ║
-   ║  croiser plusieurs réponses.                              ║
    ╚════════════════════════════════════════════════════════════╝ */
 const ARCHETYPES = {
   Environnement:  { name: "L'Explorateur Sensoriel",  desc: "Attentif à chaque détail, vous trouvez la magie là où les autres ne regardent pas." },
@@ -703,11 +822,11 @@ const ARCHETYPES = {
   Victoire:       { name: "Le Dépasseur",             desc: "Vous vous battez contre vos propres limites — et vous gagnez souvent." }
 };
 
+
 /* ╔════════════════════════════════════════════════════════════╗
    ║  ═══ CONFIG COLLECTE ═══                                  ║
    ║                                                           ║
    ║  SETUP GOOGLE APPS SCRIPT (gratuit, 5 min) :             ║
-   ║                                                           ║
    ║  1. Ouvre un Google Sheet vide                            ║
    ║  2. Extensions → Apps Script                              ║
    ║  3. Remplace tout le code par :                           ║
@@ -725,8 +844,7 @@ const ARCHETYPES = {
    ║  }                                                        ║
    ║                                                           ║
    ║  4. Déployer → Nouveau déploiement                        ║
-   ║     Type : Application Web                                ║
-   ║     Accès : Tout le monde                                 ║
+   ║     Type : Application Web / Accès : Tout le monde        ║
    ║  5. Copie l'URL → colle dans SCRIPT_URL ci-dessous        ║
    ╚════════════════════════════════════════════════════════════╝ */
 const SCRIPT_URL = ''; /* ← Ton URL Apps Script ici */
@@ -734,11 +852,26 @@ const SCRIPT_URL = ''; /* ← Ton URL Apps Script ici */
 
 
 /* ════════════════════════════════════════════════════════════
-   VIDEO MANAGER
-   Orchestre 3 players Vimeo persistants :
-   playerA  → boucle active (visible)
-   playerT  → transition (joue une fois)
-   playerB  → prochaine boucle (précharge en arrière-plan)
+   VIDEO MANAGER v4
+   ────────────────────────────────────────────────────────────
+   Orchestre 3 players Vimeo :
+
+   playerA / playerB  → boucles (alternent : l'un actif, l'autre précharge)
+   playerT            → transitions (joue une fois, jamais en loop)
+
+   États : 'IDLE' → 'TRANSITION' → 'LOOP' → 'TRANSITION' → …
+
+   Cross-fade propre :
+   • La boucle suivante commence à fade-in à (durée_trans − 1.2s)
+   • La transition commence à fade-out 300ms plus tard
+   • Jamais de frame noire entre les deux
+   • La transition est mise en pause dès le début du cross-fade
+     pour éviter qu'elle tente de looper.
+
+   Seamless loops :
+   • Un overlay noir dans chaque slot de boucle
+   • Fade-out (overlay → opaque) à (durée_loop − 0.8s)
+   • Snap noir + fade-in (overlay → transparent) au restart
 ════════════════════════════════════════════════════════════ */
 class VideoManager {
   constructor() {
@@ -746,21 +879,60 @@ class VideoManager {
     this.slotT = document.getElementById('slot-trans');
     this.slotB = document.getElementById('slot-loop-b');
 
-    this.playerA = null;
-    this.playerT = null;
-    this.playerB = null;
+    /* Overlays pour les seamless loops */
+    this.overlayA = this._addOverlay(this.slotA);
+    this.overlayB = this._addOverlay(this.slotB);
 
-    this.activeLoop  = 'A';    /* Quel slot affiche la boucle courante */
-    this._pendingLoop = null;  /* Slot à révéler quand la transition finit */
-    this._transEndFired = false;
-    this._ready = false;
+    this.playerA = this.playerT = this.playerB = null;
+
+    this.activeLoop = 'A'; /* Quel slot de boucle est actif */
+    this._state     = 'IDLE';
+    this._ready     = false;
+
+    /*
+      État de la transition courante.
+      Réinitialisé à chaque goTo() / init().
+      Utilisé par les watchers persistants attachés une seule fois.
+    */
+    this._trans = {
+      pendingSlot: null, /* Slot de boucle à révéler après la transition */
+      pendingCb:   null, /* Callback une fois la transition terminée */
+      dur:         null, /* Durée en secondes (null = pas encore récupérée) */
+      fired:       false /* Cross-fade déjà déclenché ? */
+    };
+
+    /*
+      État de chaque boucle pour le seamless fade.
+      Réinitialisé quand une nouvelle vidéo est chargée dans le slot.
+    */
+    this._loop = {
+      A: { dur: null, fadedOut: false },
+      B: { dur: null, fadedOut: false }
+    };
+
+    /* Éléments HTML du commentaire de transition */
+    this._commEl   = document.getElementById('transition-commentary');
+    this._commText = document.getElementById('trans-commentary-text');
+
+    /* Z-indices de base (gérés dynamiquement en JS) */
+    this.slotA.style.zIndex = 2;
+    this.slotT.style.zIndex = 3;
+    this.slotB.style.zIndex = 1;
+  }
+
+  /* ── Crée l'overlay seamless dans un slot ── */
+  _addOverlay(slot) {
+    const el = document.createElement('div');
+    el.className = 'loop-fade-overlay';
+    slot.appendChild(el);
+    return el;
   }
 
   /* ── Crée un player Vimeo dans un slot ── */
-  _makePlayer(slot, videoId, isLoop) {
+  _makePlayer(slot, id, isLoop) {
     return new Vimeo.Player(slot, {
-      id:         parseInt(videoId, 10),
-      background: 1,       /* Pas de contrôles, lecture auto, muet */
+      id:         parseInt(id, 10),
+      background: 1,
       loop:       isLoop ? 1 : 0,
       autoplay:   1,
       muted:      1,
@@ -768,118 +940,268 @@ class VideoManager {
     });
   }
 
-  /* ── Initialisation — joue la vidéo d'intro puis boucle ── */
-  async init(introId, loopId) {
-    /* Les 3 players en parallèle pour réduire le temps de chargement */
-    this.playerT = this._makePlayer(this.slotT, introId, false);
-    this.playerA = this._makePlayer(this.slotA, loopId,  true);
-    this.playerB = this._makePlayer(this.slotB, loopId,  true); /* placeholder */
+  /*
+    Attache le watcher de seamless loop pour un slot donné.
+    N'est attaché qu'une seule fois par player.
+    Utilise this._loop[slot] — toujours lu en direct, donc
+    réinitialisable de l'extérieur via this._loop[slot] = {…}.
+  */
+  _attachLoopWatcher(player, slot) {
+    const FADE_S   = 0.7;   /* Durée du fade en secondes */
+    const TRIGGER  = FADE_S + 0.15; /* Déclenchement avant la fin */
+    const overlay  = slot === 'A' ? this.overlayA : this.overlayB;
 
-    /* Mettre en pause au départ (on va contrôler manuellement) */
-    await Promise.all([
-      this.playerT.ready(),
-      this.playerA.ready(),
-      this.playerB.ready()
-    ]);
+    player.on('timeupdate', async ({ seconds }) => {
+      /* Seulement quand ce slot est la boucle active et qu'on est en mode LOOP */
+      if (this._state !== 'LOOP' || this.activeLoop !== slot) return;
 
-    /* Mettre la boucle en pause mais chargée */
-    await this.playerA.setCurrentTime(0);
+      const ls = this._loop[slot]; /* Toujours en direct */
 
-    /* Écouter la fin de la transition */
-    this._attachTransEndListener();
+      /* Récupérer la durée si pas encore connue */
+      if (!ls.dur) {
+        try { ls.dur = await player.getDuration(); } catch(e) { return; }
+        if (!ls.dur) return;
+      }
 
-    /* Lancer la transition d'intro */
-    this.slotT.classList.add('active');
-    this._pendingLoop = 'A';
-    this._transEndFired = false;
+      const left = ls.dur - seconds;
 
-    /* Masquer l'écran de chargement */
-    document.getElementById('loading').classList.add('hide');
-    this._ready = true;
+      /* Approche de la fin → fade overlay vers noir */
+      if (left <= TRIGGER && left > 0 && !ls.fadedOut) {
+        ls.fadedOut = true;
+        overlay.style.transition = `opacity ${FADE_S * 1000}ms ease`;
+        overlay.style.opacity    = '1';
+      }
 
-    /* Afficher l'écran intro */
-    document.getElementById('screen-0').classList.add('active');
-  }
-
-  /* ── Attache l'écouteur "fin de transition" ── */
-  _attachTransEndListener() {
-    this.playerT.on('ended', () => this._fireTransEnd());
-
-    /* Fallback : détection par timeupdate (plus fiable sur certains navigateurs) */
-    this.playerT.on('timeupdate', async (data) => {
-      if (data.seconds < 0.5) return;
-      try {
-        const dur = await this.playerT.getDuration();
-        if (dur > 0 && data.seconds >= dur - 0.25) this._fireTransEnd();
-      } catch(e) {}
+      /* Boucle redémarrée → snap noir puis fade vers transparent */
+      if (seconds < 0.15 && ls.fadedOut) {
+        ls.fadedOut = false;
+        ls.dur      = null; /* Sera re-fetché au prochain cycle */
+        overlay.style.transition = 'none';
+        overlay.style.opacity    = '1';
+        /* Double RAF pour forcer un repaint avant la transition */
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          overlay.style.transition = `opacity ${FADE_S * 1000}ms ease`;
+          overlay.style.opacity    = '0';
+        }));
+      }
     });
   }
 
-  _fireTransEnd() {
-    if (this._transEndFired) return;
-    this._transEndFired = true;
-    this._onTransEnd();
+  /*
+    Attache le watcher de fin de transition sur playerT.
+    N'est attaché qu'une seule fois, pendant init().
+    Utilise this._trans — toujours lu en direct.
+  */
+  _attachTransWatcher() {
+    /* Détection par position temporelle (plus fiable que 'ended') */
+    this.playerT.on('timeupdate', async ({ seconds }) => {
+      if (this._state !== 'TRANSITION') return;
+      const t = this._trans;
+      if (t.fired) return;
+
+      /* Récupérer la durée si pas encore connue */
+      if (!t.dur) {
+        try { t.dur = await this.playerT.getDuration(); } catch(e) { return; }
+        if (!t.dur) return;
+      }
+
+      /* Déclencher le cross-fade à 1.2s de la fin */
+      if ((t.dur - seconds) <= 1.2 && seconds > 0.3) {
+        t.fired = true;
+        this._crossFade(t.pendingSlot, t.pendingCb);
+      }
+    });
+
+    /* Fallback : événement 'ended' */
+    this.playerT.on('ended', () => {
+      if (this._state === 'TRANSITION' && !this._trans.fired) {
+        this._trans.fired = true;
+        this._crossFade(this._trans.pendingSlot, this._trans.pendingCb);
+      }
+    });
   }
 
-  _onTransEnd() {
-    /* Cacher la transition */
-    this.slotT.classList.remove('active');
+  /*
+    Déclenche le cross-fade : fade-in de la prochaine boucle,
+    fade-out de la transition (avec léger décalage).
+    Après 1400ms, l'état passe en LOOP et le callback est appelé.
+  */
+  _crossFade(toSlot, afterCb) {
+    if (!toSlot) return; /* Transition finale sans suite */
 
-    if (!this._pendingLoop) return;
+    const toEl   = toSlot === 'A' ? this.slotA   : this.slotB;
+    const fromEl = toSlot === 'A' ? this.slotB   : this.slotA;
+    const toOv   = toSlot === 'A' ? this.overlayA : this.overlayB;
 
-    /* Révéler la prochaine boucle */
-    const nextSlotEl = this._pendingLoop === 'A' ? this.slotA : this.slotB;
-    const prevSlotEl = this._pendingLoop === 'A' ? this.slotB : this.slotA;
+    /* S'assurer que l'overlay de la nouvelle boucle est transparent */
+    toOv.style.transition = 'none';
+    toOv.style.opacity    = '0';
+    this._loop[toSlot] = { dur: null, fadedOut: false };
 
-    nextSlotEl.classList.add('active');
-    setTimeout(() => prevSlotEl.classList.remove('active'), 1400);
+    /* Z-indices : nouvelle boucle sur le dessus, trans en dessous */
+    toEl.style.zIndex        = 5;
+    this.slotT.style.zIndex  = 3;
+    fromEl.style.zIndex      = 1;
 
-    this.activeLoop  = this._pendingLoop;
-    this._pendingLoop = null;
+    /* Fade-in de la nouvelle boucle */
+    const toPlayer = toSlot === 'A' ? this.playerA : this.playerB;
+    try { toPlayer.play(); } catch(e) {}
+    toEl.classList.add('active');
 
-    /* Déclencher le callback externe si défini */
-    if (this._afterTransCb) { this._afterTransCb(); this._afterTransCb = null; }
+    /* Masquer le commentaire */
+    this._commEl?.classList.remove('active');
+
+    /* Fade-out de la transition avec 300ms de décalage (cross-fade propre) */
+    setTimeout(() => {
+      this.slotT.classList.remove('active');
+      /* Mettre en pause la transition pour éviter qu'elle tente de looper */
+      try { this.playerT.pause(); } catch(e) {}
+    }, 300);
+
+    /* Nettoyage après la fin du cross-fade CSS (1200ms) */
+    setTimeout(() => {
+      fromEl.classList.remove('active');
+
+      /* Normaliser les z-indices */
+      toEl.style.zIndex       = 2;
+      fromEl.style.zIndex     = 1;
+      this.slotT.style.zIndex = 3;
+
+      /* Réinitialiser l'état de l'ancienne boucle */
+      const fromSlot = toSlot === 'A' ? 'B' : 'A';
+      this._loop[fromSlot] = { dur: null, fadedOut: false };
+      const fromOv = fromSlot === 'A' ? this.overlayA : this.overlayB;
+      fromOv.style.transition = 'none';
+      fromOv.style.opacity    = '0';
+
+      this.activeLoop = toSlot;
+      this._state     = 'LOOP';
+
+      if (afterCb) afterCb();
+    }, 1400); /* Légèrement supérieur à la durée CSS (1200ms) */
   }
 
-  /* ── Transition vers une nouvelle scène ──
-     transId : vidéo de transition (joue une fois)
-     loopId  : prochaine boucle (précharge pendant la transition)
-     afterCb : callback optionnel une fois la transition terminée
-  ── */
-  async goTo(transId, loopId, afterCb) {
-    if (!this._ready) return;
-    this._afterTransCb = afterCb || null;
+  /* ── Initialisation : joue l'intro puis boucle sur loopId ── */
+  async init(introId, loopId) {
+    this._state = 'TRANSITION';
 
-    /* Choisir le slot libre pour la prochaine boucle */
-    const nextSlot   = this.activeLoop === 'A' ? 'B' : 'A';
-    const nextPlayer = nextSlot === 'A' ? this.playerA : this.playerB;
-    const nextSlotEl = nextSlot === 'A' ? this.slotA   : this.slotB;
+    /* Créer les 3 players */
+    this.playerT = this._makePlayer(this.slotT, introId, false);
+    this.playerA = this._makePlayer(this.slotA, loopId,  true);
+    this.playerB = this._makePlayer(this.slotB, loopId,  true);
 
-    /* Charger la prochaine boucle (préchargement silencieux) */
-    try {
-      await nextPlayer.loadVideo(parseInt(loopId, 10));
-    } catch(e) { console.warn('Erreur chargement boucle:', e); }
+    /* Attendre que le player de transition soit prêt */
+    await this.playerT.ready();
 
-    /* Charger et lancer la transition */
-    try {
-      await this.playerT.loadVideo(parseInt(transId, 10));
-    } catch(e) { console.warn('Erreur chargement transition:', e); }
+    /* Attacher les watchers persistants (une seule fois) */
+    this._attachTransWatcher();
 
-    this._pendingLoop    = nextSlot;
-    this._transEndFired  = false;
+    /* Configurer la première transition (intro → boucle A) */
+    this._trans = { pendingSlot: 'A', pendingCb: null, dur: null, fired: false };
+
+    /* Lecture explicite (l'autoplay peut être bloqué sur certains navigateurs) */
+    try { await this.playerT.play(); } catch(e) {}
+
+    /* Rendre la transition visible (z-index élevé pendant l'intro) */
+    this.slotT.style.zIndex = 10;
     this.slotT.classList.add('active');
 
-    try { await this.playerT.play(); } catch(e) {}
+    /* Masquer le loading dès que la vidéo joue vraiment (premier timeupdate) */
+    let loadingHidden = false;
+    const onFirstPlay = ({ seconds }) => {
+      if (seconds > 0.05 && !loadingHidden) {
+        loadingHidden = true;
+        this._ready = true;
+        document.getElementById('loading').classList.add('hide');
+        document.getElementById('screen-0').classList.add('active');
+      }
+    };
+    this.playerT.on('timeupdate', onFirstPlay);
+
+    /* Fallback : afficher après 6s si la vidéo ne démarre pas */
+    setTimeout(() => {
+      if (!loadingHidden) {
+        loadingHidden = true;
+        this._ready = true;
+        document.getElementById('loading').classList.add('hide');
+        document.getElementById('screen-0').classList.add('active');
+      }
+    }, 6000);
+
+    /* Attacher les watchers de boucle une fois que les players sont prêts */
+    this.playerA.ready().then(() => {
+      this._attachLoopWatcher(this.playerA, 'A');
+      try { this.playerA.play(); } catch(e) {} /* Lancer en avance pour réduire le lag */
+    }).catch(() => {});
+
+    this.playerB.ready().then(() => {
+      this._attachLoopWatcher(this.playerB, 'B');
+    }).catch(() => {});
   }
 
-  /* ── Joue une transition finale (sans prochaine boucle) ── */
+  /*
+    Lance une transition vers une nouvelle scène.
+    transId   : ID Vimeo de la vidéo de transition
+    loopId    : ID Vimeo de la prochaine boucle (précharge pendant la transition)
+    afterCb   : callback appelé quand la prochaine boucle est pleinement visible
+    commentary: texte affiché pendant la transition (feedback du choix)
+  */
+  async goTo(transId, loopId, afterCb, commentary) {
+    if (!this._ready) return;
+
+    const nextSlot   = this.activeLoop === 'A' ? 'B' : 'A';
+    const nextPlayer = nextSlot === 'A' ? this.playerA : this.playerB;
+    const currEl     = this.activeLoop === 'A' ? this.slotA : this.slotB;
+    const nextEl     = nextSlot === 'A' ? this.slotA : this.slotB;
+
+    this._state = 'TRANSITION';
+
+    /* Z-indices : boucle courante en bas, transition au milieu, prochaine boucle masquée */
+    currEl.style.zIndex       = 1;
+    this.slotT.style.zIndex   = 3;
+    nextEl.style.zIndex       = 1;
+
+    /* Préparer l'état de la transition */
+    this._loop[nextSlot] = { dur: null, fadedOut: false };
+    this._trans = { pendingSlot: nextSlot, pendingCb: afterCb || null, dur: null, fired: false };
+
+    /* Précharger la prochaine boucle en arrière-plan */
+    try { await nextPlayer.loadVideo(parseInt(loopId, 10)); } catch(e) {
+      console.warn('[VideoMgr] Erreur chargement boucle:', e);
+    }
+
+    /* Charger et démarrer la transition */
+    try { await this.playerT.loadVideo(parseInt(transId, 10)); } catch(e) {
+      console.warn('[VideoMgr] Erreur chargement transition:', e);
+    }
+    this.slotT.classList.add('active');
+    try { await this.playerT.play(); } catch(e) {}
+
+    /* Afficher le commentaire (avec délai pour laisser la vidéo s'établir) */
+    if (commentary && this._commText && this._commEl) {
+      this._commText.textContent = commentary;
+      setTimeout(() => {
+        if (this._state === 'TRANSITION') {
+          this._commEl.classList.add('active');
+        }
+      }, 700);
+    }
+  }
+
+  /* ── Transition finale (sans boucle suivante) ── */
   async playFinal(transId) {
     if (!this._ready) return;
+    this._state = 'TRANSITION';
+
+    /* Pas de pendingSlot → _crossFade ne fera rien */
+    this._trans = { pendingSlot: null, pendingCb: null, dur: null, fired: false };
+
+    const currEl = this.activeLoop === 'A' ? this.slotA : this.slotB;
+    currEl.style.zIndex     = 1;
+    this.slotT.style.zIndex = 10;
+
     try {
       await this.playerT.loadVideo(parseInt(transId, 10));
-      this._pendingLoop   = null;
-      this._transEndFired = false;
-      this.slotT.classList.add('instant');
       this.slotT.classList.add('active');
       await this.playerT.play();
     } catch(e) {}
@@ -894,25 +1216,24 @@ const videoMgr = new VideoManager();
    ÉTAT DU QUIZ
 ════════════════════════════════════════════════════════════ */
 const state = {
-  step:    0,                 /* Index dans QUESTIONS (0 = première question) */
-  answers: {}                 /* { 0: {label, value}, 1: ..., ... } */
+  step:    0,
+  answers: {}
 };
+
 
 /* ════════════════════════════════════════════════════════════
    GÉNÉRATION DES ÉCRANS DE QUESTIONS
-   (évite de dupliquer le HTML pour chaque question)
 ════════════════════════════════════════════════════════════ */
 function buildQuestionScreens() {
-  const app = document.getElementById('app');
-  /* Insérer avant l'écran résultat */
+  const app          = document.getElementById('app');
   const resultScreen = document.getElementById('screen-result');
+  const letters      = ['A','B','C','D','E'];
 
   QUESTIONS.forEach((q, i) => {
     const div = document.createElement('div');
     div.className = 'screen';
     div.id = `screen-q${i}`;
 
-    const letters = ['A','B','C','D','E'];
     const choicesHTML = q.choices.map((c, ci) => `
       <button class="choice-btn"
         data-qi="${i}"
@@ -934,18 +1255,18 @@ function buildQuestionScreens() {
   });
 }
 
+
 /* ════════════════════════════════════════════════════════════
    NAVIGATION
 ════════════════════════════════════════════════════════════ */
 function showScreen(id) {
   document.querySelector('.screen.active')?.classList.remove('active');
-  document.getElementById(id)?.classList.add('active');
+  if (id) document.getElementById(id)?.classList.add('active');
 }
 
 function updateProgress(qIndex) {
-  /* qIndex = -1 (intro), 0..n (questions), n+1 (résultat) */
   const total = QUESTIONS.length;
-  const pct   = qIndex < 0 ? 0
+  const pct   = qIndex < 0   ? 0
               : qIndex >= total ? 100
               : ((qIndex + 1) / total) * 100;
   document.getElementById('progress-fill').style.width = pct + '%';
@@ -959,43 +1280,36 @@ function updateProgress(qIndex) {
   }
 }
 
-/* Résoudre quelle transition/boucle utiliser pour une réponse donnée */
 function resolveNextVideos(qIndex, choiceValue) {
-  /* Cherche un override dans CHEMINS */
   const key = `Q${qIndex + 1}_${choiceValue}`;
   if (CHEMINS[key]) return CHEMINS[key];
-  /* Sinon, chemin linéaire */
-  const scene = VIDEO_SCENES[qIndex]; /* La scène courante a la trans pour partir */
+  const scene = VIDEO_SCENES[qIndex];
   const next  = VIDEO_SCENES[qIndex + 1];
   return { trans: scene.trans, loop: next.loop };
 }
+
 
 /* ════════════════════════════════════════════════════════════
    SÉLECTION D'UN CHOIX
 ════════════════════════════════════════════════════════════ */
 document.addEventListener('click', function(e) {
+  /* Bouton choix */
   const btn = e.target.closest('.choice-btn');
   if (btn) {
     const qi    = parseInt(btn.dataset.qi, 10);
     const value = btn.dataset.value;
     const label = btn.dataset.label;
 
-    /* Déselectionner les autres du même écran */
     btn.closest('.choices').querySelectorAll('.choice-btn')
        .forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
 
-    /* Enregistrer */
     state.answers[qi] = { value, label, question: QUESTIONS[qi].label };
-
-    /* Activer le bouton suivant */
     document.getElementById(`btn-q${qi}`).disabled = false;
-
-    /* Effet visuel mist */
     spawnMistBurst(btn);
   }
 
-  /* Boutons "Continuer" / "Révéler" */
+  /* Bouton "Continuer" / "Révéler" */
   const btnQ = e.target.closest('[id^="btn-q"]');
   if (btnQ && !btnQ.disabled) {
     const qi = parseInt(btnQ.id.replace('btn-q',''), 10);
@@ -1009,14 +1323,13 @@ document.addEventListener('click', function(e) {
   if (e.target.id === 'btn-submit') submitData(e);
 });
 
+
 /* ════════════════════════════════════════════════════════════
    FLUX PRINCIPAL
 ════════════════════════════════════════════════════════════ */
 function startExperience() {
   showScreen('screen-q0');
   updateProgress(0);
-  /* La transition d'intro est déjà en cours (lancée par videoMgr.init),
-     la boucle plage est déjà en train de précharger en arrière-plan */
 }
 
 function advanceFromQuestion(qi) {
@@ -1025,52 +1338,52 @@ function advanceFromQuestion(qi) {
 
   const isLast = qi === QUESTIONS.length - 1;
 
-  if (isLast) {
-    showResult();
-  } else {
-    /* Prochain écran de question */
-    showScreen(`screen-q${qi + 1}`);
-    updateProgress(qi + 1);
-  }
+  /* Récupérer le feedback pour le commentaire de transition */
+  const choice     = QUESTIONS[qi].choices.find(c => c.value === answer.value);
+  const commentary = choice?.feedback || '';
 
-  /* Vidéos : résoudre la prochaine transition/boucle */
-  const nextVideos = resolveNextVideos(qi, answer.value);
+  /* Masquer l'écran courant immédiatement */
+  showScreen(null);
 
   if (isLast) {
-    /* Pour le résultat, la transition se joue automatiquement */
-    videoMgr.goTo(nextVideos.trans, nextVideos.loop);
+    /*
+      Dernière question : showResult() gère la transition vidéo.
+      NE PAS appeler goTo() ici — c'est showResult() qui s'en charge.
+    */
+    showResult(commentary);
   } else {
-    videoMgr.goTo(nextVideos.trans, nextVideos.loop);
+    const nextVideos = resolveNextVideos(qi, answer.value);
+
+    /*
+      Les questions n'apparaissent QUE quand la prochaine boucle démarre
+      (le afterCb est appelé par VideoManager._crossFade après le cross-fade).
+    */
+    videoMgr.goTo(
+      nextVideos.trans,
+      nextVideos.loop,
+      () => {
+        showScreen(`screen-q${qi + 1}`);
+        updateProgress(qi + 1);
+      },
+      commentary
+    );
   }
 }
+
 
 /* ════════════════════════════════════════════════════════════
    RÉSULTAT
 ════════════════════════════════════════════════════════════ */
 function calcArchetype() {
-  /*
-    Logique simple : l'archétype est déterminé par la première réponse.
-    ─────────────────────────────────────────────────────────────────
-    Pour une logique plus complexe (score pondéré, combinaisons), tu
-    peux modifier cette fonction. Exemple :
-
-    const scores = {};
-    Object.values(state.answers).forEach(a => {
-      scores[a.value] = (scores[a.value] || 0) + 1;
-    });
-    const top = Object.entries(scores).sort((a,b) => b[1]-a[1])[0][0];
-    return ARCHETYPES[top] || ARCHETYPES['Action'];
-  */
   const firstValue = state.answers[0]?.value || 'Action';
   return ARCHETYPES[firstValue] || ARCHETYPES['Action'];
 }
 
-function showResult() {
+function showResult(commentary) {
   const arch = calcArchetype();
   document.getElementById('result-arch').textContent = arch.name;
   document.getElementById('result-desc').textContent = arch.desc;
 
-  /* Récapitulatif des réponses */
   const recap = document.getElementById('result-recap');
   recap.innerHTML = '';
   QUESTIONS.forEach((q, i) => {
@@ -1083,14 +1396,21 @@ function showResult() {
     recap.appendChild(row);
   });
 
-  showScreen('screen-result');
-  updateProgress(QUESTIONS.length + 1);
+  /* Transition ruines → portail, puis boucle portail, puis afficher l'écran résultat */
+  const preResultScene = VIDEO_SCENES[VIDEO_SCENES.length - 2]; /* Scene 4 (ruines) */
+  const resultScene    = VIDEO_SCENES[VIDEO_SCENES.length - 1]; /* Scene 5 (portail) */
 
-  /* Déclencher la transition ruines → portail à l'arrivée sur l'écran résultat */
-  const resultScene = VIDEO_SCENES[VIDEO_SCENES.length - 1];
-  const preResultScene = VIDEO_SCENES[VIDEO_SCENES.length - 2];
-  videoMgr.goTo(preResultScene.trans, resultScene.loop);
+  videoMgr.goTo(
+    preResultScene.trans,
+    resultScene.loop,
+    () => {
+      showScreen('screen-result');
+      updateProgress(QUESTIONS.length + 1);
+    },
+    commentary || 'Le portail s\'ouvre. Votre essence se révèle enfin.'
+  );
 }
+
 
 /* ════════════════════════════════════════════════════════════
    COLLECTE DE DONNÉES
@@ -1114,10 +1434,10 @@ function submitData(e) {
 
   if (SCRIPT_URL) {
     fetch(SCRIPT_URL, {
-      method: 'POST',
-      mode:   'no-cors',          /* Contourne CORS depuis un iframe */
+      method:  'POST',
+      mode:    'no-cors',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body:    JSON.stringify(payload)
     }).catch(err => console.warn('Envoi échoué:', err));
   }
 
@@ -1125,10 +1445,11 @@ function submitData(e) {
   const lastScene = VIDEO_SCENES[VIDEO_SCENES.length - 1];
   videoMgr.playFinal(lastScene.trans);
 
-  btn.textContent = 'Profil envoyé  ✦';
-  btn.disabled    = true;
+  btn.textContent   = 'Profil envoyé  ✦';
+  btn.disabled      = true;
   btn.style.opacity = '0.45';
 }
+
 
 /* ════════════════════════════════════════════════════════════
    EFFET MIST BURST (sélection d'un choix)
@@ -1149,14 +1470,14 @@ function spawnMistBurst(element) {
   const colors = ['rgba(220,232,252,0.9)','rgba(200,216,238,0.7)',
                   'rgba(184,154,90,0.6)', 'rgba(210,225,245,0.5)'];
   for (let i = 0; i < 18; i++) {
-    const pt    = document.createElement('div');
+    const pt     = document.createElement('div');
     pt.className = 'sel-pt';
-    const ang   = (Math.PI * 2 / 18) * i + (Math.random() - 0.5) * 0.4;
-    const dist  = 22 + Math.random() * 70;
-    const dx    = Math.cos(ang) * dist;
-    const dy    = Math.sin(ang) * dist - 18;
-    const color = colors[Math.floor(Math.random() * colors.length)];
-    const size  = 2 + Math.random() * 2;
+    const ang    = (Math.PI * 2 / 18) * i + (Math.random() - 0.5) * 0.4;
+    const dist   = 22 + Math.random() * 70;
+    const dx     = Math.cos(ang) * dist;
+    const dy     = Math.sin(ang) * dist - 18;
+    const color  = colors[Math.floor(Math.random() * colors.length)];
+    const size   = 2 + Math.random() * 2;
     pt.style.cssText = `
       left:${cx}px;top:${cy}px;
       width:${size}px;height:${size}px;
@@ -1169,6 +1490,7 @@ function spawnMistBurst(element) {
     setTimeout(() => pt.remove(), 850);
   }
 }
+
 
 /* ════════════════════════════════════════════════════════════
    PARTICULES DE BRUME AMBIANTE
@@ -1188,12 +1510,11 @@ function spawnMistBurst(element) {
   }
 })();
 
+
 /* ════════════════════════════════════════════════════════════
    LANCEMENT
 ════════════════════════════════════════════════════════════ */
 buildQuestionScreens();
-
-/* Init vidéos : intro transition (vidéo 1) → boucle plage (vidéo 2) */
 videoMgr.init(VIDEO_SCENES[0].intro, VIDEO_SCENES[0].loop);
 
 </script>
